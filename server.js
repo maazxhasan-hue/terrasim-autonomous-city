@@ -1,28 +1,46 @@
-const http = require("node:http");
-const fs = require("node:fs");
-const path = require("node:path");
-const PORT = Number(process.env.PORT || 3000);
-const ROOT = __dirname;
-const MIME = { ".html":"text/html; charset=utf-8", ".css":"text/css; charset=utf-8", ".js":"text/javascript; charset=utf-8", ".json":"application/json; charset=utf-8", ".svg":"image/svg+xml" };
-function send(res, status, data, type="application/json; charset=utf-8") { res.writeHead(status, { "content-type":type, "cache-control":"no-store" }); res.end(typeof data==="string" ? data : JSON.stringify(data)); }
-function readBody(req) { return new Promise((resolve,reject)=>{ let body=""; req.on("data",chunk=>{ body+=chunk; if(body.length>1_000_000) reject(new Error("Request too large")); }); req.on("end",()=>{ try{resolve(body?JSON.parse(body):{});}catch{reject(new Error("Invalid JSON"));} }); req.on("error",reject); }); }
-const server=http.createServer(async(req,res)=>{
- const url=new URL(req.url,"http://localhost");
- if(req.method==="OPTIONS"){res.writeHead(204,{"access-control-allow-methods":"GET,POST,OPTIONS","access-control-allow-headers":"content-type"});return res.end();}
- if(url.pathname==="/api/health") return send(res,200,{ok:true,service:"terrasim-autonomous-city",version:"1.0.0",aiConfigured:Boolean(process.env.AI_API_KEY),timestamp:new Date().toISOString()});
- if(url.pathname==="/api/plan"&&req.method==="POST"){
-  let body;try{body=await readBody(req);}catch(e){return send(res,400,{error:e.message});}
-  const prompt=String(body.prompt||"").trim().slice(0,4000);if(!prompt)return send(res,400,{error:"Provide a civilization goal or question."});
-  if(!process.env.AI_API_KEY)return send(res,200,{mode:"local",plan:"AI provider is not connected yet. The local simulation runs with built-in decision rules. To enable AI planning, configure AI_API_KEY, AI_BASE_URL, and AI_MODEL as private service environment variables.",aiConfigured:false});
-  const base=(process.env.AI_BASE_URL||"https://api.openai.com/v1").replace(/\/+$/,"");const model=process.env.AI_MODEL||"gpt-4.1-mini";
-  try{const upstream=await fetch(base+"/chat/completions",{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+process.env.AI_API_KEY},body:JSON.stringify({model,temperature:.4,messages:[{role:"system",content:"You are TerraSim's civilization planning advisor. Help a simulation of 50 agents develop a sustainable city on a small grid. Give practical, resource-aware steps. Do not claim actions were executed. Keep responses concise."},{role:"user",content:prompt+"\nCurrent simulation snapshot: "+JSON.stringify({day:body.day,food:body.food,materials:body.materials,knowledge:body.knowledge,happiness:body.happiness,housing:body.housing,buildings:body.buildings})}]})});
-   const result=await upstream.json().catch(()=>({}));if(!upstream.ok)return send(res,502,{error:"AI provider request failed",detail:result.error?.message||("HTTP "+upstream.status)});
-   return send(res,200,{mode:"ai",aiConfigured:true,model,plan:result.choices?.[0]?.message?.content||"No plan returned."});
-  }catch(e){return send(res,502,{error:"Could not reach AI provider",detail:e.message});}
- }
- if(url.pathname.startsWith("/api/"))return send(res,404,{error:"API route not found"});
- const requested=url.pathname==="/"?"/public/index.html":url.pathname;const file=path.resolve(ROOT,"."+requested);
- if(!file.startsWith(path.resolve(ROOT)+path.sep))return send(res,403,{error:"Forbidden"});
- fs.readFile(file,(err,bytes)=>{if(err)return send(res,404,"Not found","text/plain; charset=utf-8");send(res,200,bytes.toString(),MIME[path.extname(file)]||"application/octet-stream");});
-});
-server.listen(PORT,"0.0.0.0",()=>console.log("TerraSim listening on "+PORT));
+const http=require("node:http"),fs=require("node:fs"),path=require("node:path");
+const PORT=Number(process.env.PORT||3000),ROOT=__dirname,STATE=path.join(ROOT,"terrasim-state.json");
+const MIME={".html":"text/html; charset=utf-8",".css":"text/css; charset=utf-8",".js":"text/javascript; charset=utf-8",".json":"application/json; charset=utf-8"};
+const clamp=(n,a,b)=>Math.max(a,Math.min(b,n)),pick=a=>a[Math.floor(Math.random()*a.length)];
+const jobs=["Farmer","Builder","Gatherer","Craftsman","Researcher","Medic","Trader","Scout","Engineer","Teacher"];
+function newWorld(){let tiles=[];for(let y=0;y<32;y++)for(let x=0;x<32;x++){let r=Math.random(),kind=r<.07?"water":r<.24?"forest":r<.29?"rock":r<.34?"fertile":"grass";tiles.push({x,y,kind,building:null,road:false})}
+const agents=Array.from({length:100},(_,i)=>({id:i+1,name:pick(["Ari","Mira","Sam","Nia","Leo","Zara","Noah","Ira","Kai","Amal"])+i+1,x:3+Math.floor(Math.random()*8),y:3+Math.floor(Math.random()*8),job:jobs[i%jobs.length],energy:50+Math.floor(Math.random()*50),hunger:Math.floor(Math.random()*30),health:90+Math.floor(Math.random()*10),skill:1+Math.floor(Math.random()*5),wealth:10+Math.floor(Math.random()*30),goal:"Find useful work",home:null,alive:true}));
+return {version:2,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),day:1,tick:0,paused:false,worldSize:32,population:100,food:500,wood:260,stone:160,knowledge:5,happiness:76,tech:1,buildings:{homes:8,farms:4,workshops:1,clinics:0,schools:0,markets:1,roads:0},tiles,agents,events:[{day:1,text:"A new settlement forms beside a freshwater lake."},{day:1,text:"The council assigns initial work roles and surveys nearby resources."}],goal:"Build a resilient, self-sustaining civilization"}}
+function load(){try{let w=JSON.parse(fs.readFileSync(STATE,"utf8"));if(w.version===2&&w.tiles?.length===1024&&w.agents?.length)return w}catch{}let w=newWorld();save(w);return w}
+function save(w){w.updatedAt=new Date().toISOString();try{fs.writeFileSync(STATE,JSON.stringify(w))}catch(e){console.error("state save failed:",e.message)}}
+let world=load(),busy=false;
+function event(s){world.events.unshift({day:world.day,text:s});world.events=world.events.slice(0,40)}
+function distance(a,b){return Math.abs(a.x-b.x)+Math.abs(a.y-b.y)}
+function move(a){let candidates=[[a.x+1,a.y],[a.x-1,a.y],[a.x,a.y+1],[a.x,a.y-1]].filter(([x,y])=>x>=0&&y>=0&&x<32&&y<32);let [x,y]=pick(candidates);a.x=x;a.y=y}
+function step(){if(world.paused||busy)return;busy=true;try{world.tick++;if(world.tick%6===0)world.day++;const active=world.agents.filter(a=>a.alive);let farmers=0,builders=0,gatherers=0,researchers=0;
+for(const a of active){a.hunger=clamp(a.hunger+2,0,100);a.energy=clamp(a.energy+(a.job==="Medic"?-1:-2),0,100);if(a.hunger>70||a.energy<15){a.goal=a.hunger>70?"Find food":"Rest and recover";if(world.food>0&&a.hunger>50){world.food-=.4;a.hunger=clamp(a.hunger-24,0,100)}else a.health=clamp(a.health-1,0,100);a.energy=clamp(a.energy+5,0,100);move(a);continue}
+if(world.food<220)a.job="Farmer";else if(world.wood<90||world.stone<50)a.job="Gatherer";else if(world.buildings.homes<Math.ceil(active.length/8))a.job="Builder";else if(world.knowledge<70&&Math.random()<.2)a.job="Researcher";else if(Math.random()<.06)a.job=pick(jobs);
+if(a.job==="Farmer"){farmers++;a.goal="Grow and harvest food";world.food+=.55*a.skill;a.energy-=1}
+else if(a.job==="Builder"){builders++;a.goal="Expand housing and roads";world.wood=Math.max(0,world.wood-.06);a.energy-=1}
+else if(a.job==="Gatherer"){gatherers++;a.goal="Collect wood and stone";world.wood+=.25*a.skill;world.stone+=.12*a.skill}
+else if(a.job==="Researcher"){researchers++;a.goal="Study tools and agriculture";world.knowledge+=.08*a.skill}
+else if(a.job==="Medic"){a.goal="Care for neighbors";let neighbor=active.find(b=>b.health<85&&distance(a,b)<3);if(neighbor)neighbor.health=clamp(neighbor.health+1,0,100)}
+else if(a.job==="Trader"){a.goal="Exchange surplus goods";a.wealth+=Math.random()<.5?1:0}
+else a.goal=pick(["Maintain tools","Explore nearby land","Teach a skill","Help a neighbor","Improve local craft"]);
+if(Math.random()<.72)move(a)}
+if(world.tick%3===0){world.food=Math.max(0,world.food-active.length*.7);world.happiness=clamp(world.happiness+(world.food>100?.4:-1)+(world.buildings.homes*8>=active.length?.2:-.6),0,100)}
+if(builders>=5&&world.wood>20&&world.stone>12&&world.buildings.homes<30&&Math.random()<.65){let t=world.tiles.filter(t=>!t.building&&!["water","rock"].includes(t.kind)&&!t.road);if(t.length){let b=pick(t);b.building="home";world.buildings.homes++;world.wood-=8;world.stone-=4;event("Builders completed a home; housing capacity increased.")}}
+if(gatherers>=4&&world.tick%4===0){let t=world.tiles.find(t=>t.kind==="forest"&&!t.building);if(t){t.kind="grass";world.wood+=3}}
+if(world.tick%5===0&&world.wood>25&&world.buildings.farms<20&&world.food<350){let t=world.tiles.find(t=>t.kind==="fertile"&&!t.building);if(t){t.building="farm";world.buildings.farms++;world.wood-=5;event("A new farm opened on fertile ground.")}}
+if(world.tick%8===0&&world.wood>20){let t=world.tiles.find(t=>!t.road&&!t.building&&t.kind!=="water");if(t){t.road=true;world.buildings.roads++;world.wood-=2}}
+if(world.tick%12===0&&researchers>0){world.tech+=.1;event("Researchers shared a practical discovery; technology advanced.")} 
+if(world.tick%6===0)event("Day "+world.day+": "+farmers+" farmers, "+builders+" builders, "+gatherers+" gatherers and "+researchers+" researchers coordinated work.");
+if(world.food<30&&world.tick%3===0)event("Food shortage warning: the community needs more productive farms.");
+world.population=active.length;save(world)}finally{busy=false}}
+setInterval(step,10000);
+function send(res,status,data,type="application/json; charset=utf-8"){res.writeHead(status,{"content-type":type,"cache-control":"no-store","access-control-allow-origin":"*"});res.end(typeof data==="string"?data:JSON.stringify(data))}
+function body(req){return new Promise((resolve,reject)=>{let s="";req.on("data",c=>{s+=c;if(s.length>20000)reject(Error("Request too large"))});req.on("end",()=>{try{resolve(s?JSON.parse(s):{})}catch{reject(Error("Invalid JSON"))}});req.on("error",reject)})}
+const server=http.createServer(async(req,res)=>{const u=new URL(req.url,"http://localhost");
+if(req.method==="OPTIONS"){res.writeHead(204,{"access-control-allow-methods":"GET,POST,OPTIONS","access-control-allow-headers":"content-type"});return res.end()}
+if(u.pathname==="/api/health")return send(res,200,{ok:true,service:"terrasim-civilization",version:"2.0.0",aiConfigured:Boolean(process.env.AI_API_KEY),persistentState:fs.existsSync(STATE),paused:world.paused,day:world.day,agents:world.population,updatedAt:world.updatedAt});
+if(u.pathname==="/api/world")return send(res,200,world);
+if(u.pathname==="/api/control"&&req.method==="POST"){let b;try{b=await body(req)}catch(e){return send(res,400,{error:e.message})}if(b.action==="pause")world.paused=true;else if(b.action==="resume")world.paused=false;else if(b.action==="step"){world.paused=true;step()}else if(b.action==="goal"&&typeof b.goal==="string")world.goal=b.goal.slice(0,300);else return send(res,400,{error:"Unknown action"});save(world);return send(res,200,{ok:true,paused:world.paused,day:world.day,goal:world.goal})}
+if(u.pathname==="/api/plan"&&req.method==="POST"){let b;try{b=await body(req)}catch(e){return send(res,400,{error:e.message})}const prompt=String(b.prompt||"").trim().slice(0,400);if(!prompt)return send(res,400,{error:"Enter a goal"});world.goal=prompt;save(world);if(!process.env.AI_API_KEY)return send(res,200,{mode:"local",plan:"Goal recorded in the shared world. Current snapshot: "+world.population+" agents, "+Math.floor(world.food)+" food, "+Math.floor(world.wood)+" wood, "+Math.floor(world.stone)+" stone, "+world.buildings.homes+" homes. The simulation will adapt its workforce to resource shortages and construction needs. Model-based planning is not connected yet."});try{const base=(process.env.AI_BASE_URL||"https://api.openai.com/v1").replace(/\/+$/,"");const up=await fetch(base+"/chat/completions",{method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+process.env.AI_API_KEY},body:JSON.stringify({model:process.env.AI_MODEL||"gpt-4.1-mini",messages:[{role:"system",content:"You advise a persistent civilization simulation. Give practical, resource-aware steps. Never claim actions were executed."},{role:"user",content:prompt+"\nWorld state: "+JSON.stringify({day:world.day,food:world.food,wood:world.wood,stone:world.stone,buildings:world.buildings,happiness:world.happiness})}]})});const j=await up.json();if(!up.ok)return send(res,502,{error:"AI provider request failed"});return send(res,200,{mode:"ai",plan:j.choices?.[0]?.message?.content||"No plan returned"})}catch{return send(res,502,{error:"AI provider unreachable"})}}
+if(u.pathname.startsWith("/api/"))return send(res,404,{error:"API route not found"});
+const p=u.pathname==="/" ? "/public/index.html" : decodeURIComponent(u.pathname);const f=path.resolve(ROOT,"."+p);if(!f.startsWith(path.resolve(ROOT)+path.sep))return send(res,403,"Forbidden","text/plain");fs.readFile(f,(e,d)=>e?send(res,404,"Not found","text/plain"):send(res,200,d.toString(),MIME[path.extname(f)]||"application/octet-stream"))});
+server.listen(PORT,"0.0.0.0",()=>console.log("TerraSim v2 server listening on "+PORT));
