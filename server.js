@@ -2,7 +2,7 @@ const http=require("node:http"),fs=require("node:fs"),path=require("node:path");
 const PORT=Number(process.env.PORT||3000),ROOT=__dirname,STATE=path.join(ROOT,"terrasim-state.json");
 const MIME={".html":"text/html; charset=utf-8",".css":"text/css; charset=utf-8",".js":"text/javascript; charset=utf-8",".json":"application/json; charset=utf-8"};
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n)),pick=a=>a[Math.floor(Math.random()*a.length)];
-const SUPABASE_URL=(process.env.SUPABASE_URL||"").replace(/\\/+$/,""),SUPABASE_KEY=process.env.SUPABASE_SERVICE_ROLE_KEY||"";
+const SUPABASE_URL=(process.env.SUPABASE_URL||"").replace(/\/+$/,""),SUPABASE_KEY=process.env.SUPABASE_SERVICE_ROLE_KEY||"";
 let hydrated=false,remoteConnected=false,persistChain=Promise.resolve();
 const jobs=["Farmer","Builder","Gatherer","Craftsman","Researcher","Medic","Trader","Scout","Engineer","Teacher"];
 function newWorld(){let tiles=[];for(let y=0;y<32;y++)for(let x=0;x<32;x++){let r=Math.random(),kind=r<.07?"water":r<.24?"forest":r<.29?"rock":r<.34?"fertile":"grass";tiles.push({x,y,kind,building:null,road:false})}
