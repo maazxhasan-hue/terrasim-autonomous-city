@@ -1,0 +1,12 @@
+{
+  "name": "terrasim-autonomous-city",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone 50-agent autonomous civilization simulation",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
