@@ -21,7 +21,8 @@
 <section class="panel"><div class="panelhead"><h2>World history</h2><span class="badge" id="eventcount">—</span></div><div class="events" id="events"></div></section></aside></div>
 <div class="footer">TerraSim is separate from Trading Agent and TradingLab03. This is a simulated world: no real money, payments, or external-world actions are enabled.</div>
 </main><script>
-const $=id=>document.getElementById(id);let world=null,lastUpdate=0,requesting=false;\nfunction cityStage(w){if(!w)return "INITIAL SETTLEMENT";const t=Number(w.tech)||1,b=w.buildings||{};if(t>=3&&(b.towers||0)>=5)return "NEON METROPOLIS";if(t>=2&&(b.towers||0)>=3)return "SKYLINE DISTRICT";if((b.homes||0)>=15||(b.roads||0)>=8)return "GROWING CITY";return "FOUNDING DISTRICT";}
+const $=id=>document.getElementById(id);let world=null,lastUpdate=0,requesting=false;
+function cityStage(w){if(!w)return "INITIAL SETTLEMENT";const t=Number(w.tech)||1,b=w.buildings||{};if(t>=3&&(b.towers||0)>=5)return "NEON METROPOLIS";if(t>=2&&(b.towers||0)>=3)return "SKYLINE DISTRICT";if((b.homes||0)>=15||(b.roads||0)>=8)return "GROWING CITY";return "FOUNDING DISTRICT";}
 const colors={grass:"#24432d",forest:"#214e32",water:"#24647b",rock:"#716b56",fertile:"#687943"};
 function draw(){const c=$("map"),ctx=c.getContext("2d");ctx.clearRect(0,0,c.width,c.height);if(!world)return;const W=c.width,H=c.height;let g=ctx.createLinearGradient(0,0,W,H);g.addColorStop(0,"#080b20");g.addColorStop(.5,"#0b1025");g.addColorStop(1,"#10091e");ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
 const glow=(x,y,r,col,alpha=1)=>{ctx.save();ctx.globalAlpha=alpha;ctx.shadowBlur=r;ctx.shadowColor=col;ctx.fillStyle=col;ctx.beginPath();ctx.arc(x,y,Math.max(1,r*.18),0,Math.PI*2);ctx.fill();ctx.restore()};
