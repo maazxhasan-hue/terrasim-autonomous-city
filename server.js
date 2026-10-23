@@ -16,7 +16,7 @@ const specialistAgents=[
  {id:"exploration-scout",name:"Exploration Scout",division:"Exploration",jobs:["Scout"],mission:"Survey nearby land and identify useful sites for future growth.",priorities:["find safe routes","identify useful terrain","avoid water and blocked sites"],actions:["explore nearby land","report promising sites"],successMetric:"new settlement opportunities are identified"}
 ];
 const specialistForJob=job=>specialistAgents.find(s=>s.jobs.includes(job))||null;
-const AI_BASE_URL=(process.env.AI_BASE_URL||"https://api.openai.com/v1").replace(/\\/+$/,"");
+const AI_BASE_URL=(process.env.AI_BASE_URL||"https://api.openai.com/v1").replace(/\/+$/,"");
 const AI_MODEL=process.env.AI_MODEL||"gpt-4.1-mini";
 const AI_AGENT_THINK_EVERY_TICKS=Math.max(1,Number(process.env.AI_AGENT_THINK_EVERY_TICKS||1));
 function ensureAgentMind(a){if(!a.mind||typeof a.mind!=="object")a.mind={identity:"Independent citizen "+a.id,values:["survival","learning","community"],longTermGoal:"Help build a resilient civilization",memories:[],lastDecision:null,decisionCount:0,lastThoughtTick:-1};if(!Array.isArray(a.mind.memories))a.mind.memories=[];if(!a.mind.values?.length)a.mind.values=["survival","learning","community"];if(!a.specialistId)a.specialistId=(specialistForJob(a.job)||{}).id||"generalist";return a.mind}
